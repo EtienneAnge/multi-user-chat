@@ -6,12 +6,12 @@ use std::fmt;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Hash)]
 pub struct Message {
-    id: Uuid,
-    pseudo: String,
-    time: Zoned,
-    content: String,
+    pub id: Uuid,
+    pub pseudo: String,
+    pub time: Zoned,
+    pub content: String,
     
-    prev_hash: u64,
+    pub prev_hash: u64,
 
 
 }
@@ -29,6 +29,7 @@ impl Message {
        }
     }
 
+    
     
 }
 
