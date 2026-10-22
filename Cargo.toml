@@ -1,0 +1,10 @@
+[workspace]
+members = ["server", "client", "common"]
+resolver = "3"
+
+[workspace.dependencies]
+tokio = {version = "1.53.3", features = ["full"] }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1"
+jiff = { version = "0.2.38", features = ["serde"] }
+uuid = { version = "1", features = ["v4", "v7", "serde"] }
