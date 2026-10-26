@@ -87,11 +87,12 @@ pub async fn read_task(reader: OwnedReadHalf, history: HistoryHandle, tx_reply: 
                 
 
                 match history.validate(msg.clone()).await {
-                    Ok(_) => {println!("Received: {msg} | \x1B[32mMessage integrity verified\x1B[0m");},
-                    Err(_) => {
-                        println!("Received: {msg} | \x1B[31mMessage invalide\x1B[0m");
+                    Ok(_) => {println!("Received: {msg} \x1B[32m[Message integrity verified]\x1B[0m");},
+                    Err(common::history::HistoryError::InvalidPrevHash) => {
+                        println!("Received: {msg} \x1B[31m[Message invalid]\x1B[0m");
                         continue;
                     },
+                    Err(e) => return Err(e.into()),
                 }
             },
             ClientRequest::GetHistory => {

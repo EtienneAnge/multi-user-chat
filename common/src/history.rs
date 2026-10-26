@@ -1,7 +1,18 @@
-use std::eprintln;
 
 use tokio::sync::{broadcast, mpsc, oneshot};
 use crate::message::{self, Message};
+
+
+
+#[derive(Debug, thiserror::Error)]
+pub enum HistoryError {
+    #[error("prev_hash does not match the last message")]
+    InvalidPrevHash,
+    #[error("history hash chain is broken")]
+    BrokenChain,
+    #[error("history actor is not running")]
+    ActorClosed,
+}
 
 
 # [derive(Clone)]
@@ -9,9 +20,10 @@ pub struct HistoryHandle {
     tx: mpsc::Sender<HistoryCommand>,
 }
 
+
 enum HistoryCommand {
-    NewHistory(oneshot::Sender<Result<(),()>>, Vec<Message>),
-    Validate(oneshot::Sender<Result<Message,()>>, Message),
+    NewHistory(oneshot::Sender<Result<(),HistoryError>>, Vec<Message>),
+    Validate(oneshot::Sender<Result<Message,HistoryError>>, Message),
     GetHistory(oneshot::Sender<Vec<Message>>),
 }
 
@@ -23,13 +35,13 @@ impl HistoryHandle {
         Self { tx }
     }
 
-    pub async fn validate(&self, msg: Message) -> Result<Message, ()> {
-        let (reply_tx, reply_rx) = oneshot::channel::<Result<Message, ()>>();
+    pub async fn validate(&self, msg: Message) -> Result<Message, HistoryError> {
+        let (reply_tx, reply_rx) = oneshot::channel::<Result<Message, HistoryError>>();
         self.tx
-        .send(HistoryCommand::Validate(reply_tx, msg))
-        .await
-        .map_err(|_| ())?;
-        reply_rx.await.unwrap_or(Err(()))
+            .send(HistoryCommand::Validate(reply_tx, msg))
+            .await
+            .map_err(|_| HistoryError::ActorClosed)?;
+        reply_rx.await.map_err(|_| HistoryError::ActorClosed)?
     }
 
     pub async fn get_history(&self) -> Vec<Message> {
@@ -38,13 +50,13 @@ impl HistoryHandle {
         reply_rx.await.unwrap_or_default()
     }
 
-    pub async fn new_history(&self, new_history: Vec<Message>) -> Result<(),()> {
+    pub async fn new_history(&self, new_history: Vec<Message>) -> Result<(), HistoryError> {
         let (reply_tx, reply_rx) = oneshot::channel();
         self.tx
         .send(HistoryCommand::NewHistory(reply_tx, new_history))
         .await
-        .map_err(|_| ())?;
-        reply_rx.await.unwrap_or(Err(()))   
+        .map_err(|_| HistoryError::ActorClosed)?;
+        reply_rx.await.map_err(|_| HistoryError::ActorClosed)?
     }
 
     pub async fn prev_hash(&self) -> String{
@@ -86,14 +98,12 @@ async fn history_actor(
                     
                     let _ = reply.send (Ok(msg));
                 }else{
-                    eprintln!("prev_hash is not valid");
-                    let _ = reply.send (Err(()));
+                    let _ = reply.send (Err(HistoryError::InvalidPrevHash));
                 }
              },
              HistoryCommand::NewHistory(reply, new_history) => {
                 if !history_integrity(&new_history) {
-                    eprintln!("hsitory hash link is broken");
-                    let _ = reply.send (Err(()));
+                    let _ = reply.send (Err(HistoryError::BrokenChain));
                     continue;
                 }
                 historic = new_history;

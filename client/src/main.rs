@@ -10,9 +10,9 @@ use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
 use tokio::sync::broadcast;
 use tokio::sync::mpsc;
 
-use std::{io, println};
+use std::{eprint, eprintln, io, println};
 use common::message::Message;
-use common::history::{HistoryHandle};
+use common::history::{self, HistoryHandle};
 
 use serde::{Serialize, Deserialize};
 
@@ -113,24 +113,32 @@ pub async fn read_task(reader: OwnedReadHalf, history: HistoryHandle)
                 
                 
                 match history.validate(msg.clone()).await {
-                    Ok(_) => {println!("{msg} | \x1B[32mMessage integrity verified\x1B[0m");},
-                    Err(_) => {
-                        println!("{msg} | \x1B[31mMessage invalide\x1B[0m");
+                    Ok(_) => {println!("{msg} \x1B[32m[Message integrity verified]\x1B[0m");},
+                    Err(history::HistoryError::InvalidPrevHash) => {
+                        println!("{msg} \x1B[31m[Message invalid]\x1B[0m");
                         continue;
                     },
-                }
+                    Err(e) => return Err(e.into()),
+                };
+                println!("Type your message : ");
             },
             ServerRequest::History(new_history) => {
-                println!("New history received");
+                
                 match history.new_history(new_history).await {
                     Ok(_) => {
                         clear_screen();
+                        println!("New history received");
                         history.print().await;
                     },
-                    Err(_) => {
-                        println!("Received history is not valid");
+                    Err(history::HistoryError::BrokenChain) => {
+                        eprintln!("hsitory hash link is broken : history rejected");
+
+                    }
+                    Err(e) => {
+                        return Err(e.into());
                     }
                 };
+                println!("Type your message : ");
                 
             }
             
@@ -173,5 +181,8 @@ use std::io::{Write};
 
 fn clear_screen() {
     print!("\x1B[2J\x1B[1;1H");
-    io::stdout().flush().unwrap();
+    match io::stdout().flush(){
+        Err (e) => eprint!("{e}"),
+        Ok(_) => {}
+    };
 }
