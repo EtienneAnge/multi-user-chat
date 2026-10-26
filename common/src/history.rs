@@ -1,7 +1,7 @@
-use std::{eprintln, hash::{DefaultHasher, Hash, Hasher}};
+use std::eprintln;
 
 use tokio::sync::{broadcast, mpsc, oneshot};
-use crate::{message::Message};
+use crate::message::{self, Message};
 
 
 # [derive(Clone)]
@@ -47,10 +47,10 @@ impl HistoryHandle {
         reply_rx.await.unwrap_or(Err(()))   
     }
 
-    pub async fn prev_hash(&self) -> u64{
+    pub async fn prev_hash(&self) -> String{
         match self.get_history().await.last(){
-            None => calculate_hash(&0),
-            Some(s) => calculate_hash(s),
+            None => message::GENESIS_HASH.to_string(),
+            Some(s) => s.compute_hash(),
         }
     }
 
@@ -71,13 +71,13 @@ async fn history_actor(
     mut rx: mpsc::Receiver<HistoryCommand>,
     tx_send: broadcast::Sender<Message>,
 ) {
-    let mut historic = Vec::new();
+    let mut historic: Vec<Message> = Vec::new();
     while let Some(cmd) = rx.recv().await {
         match cmd {
             HistoryCommand::Validate(reply, msg) => {
                 let prev_hash = match historic.last() {
-                    None => calculate_hash(&0),
-                    Some(s) => calculate_hash(s),
+                    None => message::GENESIS_HASH,
+                    Some(s) => &s.compute_hash(),
                 };
                 
                 if msg.prev_hash == prev_hash {
@@ -91,7 +91,11 @@ async fn history_actor(
                 }
              },
              HistoryCommand::NewHistory(reply, new_history) => {
-                
+                if !history_integrity(&new_history) {
+                    eprintln!("hsitory hash link is broken");
+                    let _ = reply.send (Err(()));
+                    continue;
+                }
                 historic = new_history;
                 let _ = reply.send (Ok(()));
              },
@@ -100,9 +104,23 @@ async fn history_actor(
     }
 }
 
+fn history_integrity(history: &Vec<Message>) -> bool{
+    let mut history = history.clone();
 
-fn calculate_hash<T: Hash>(t: &T) -> u64 {
-    let mut s = DefaultHasher::new();
-    t.hash(&mut s);
-    s.finish()
+    match history.pop() {
+        None => true,
+        Some(o) => {
+            let prev_hash = match history.last() {
+                None => message::GENESIS_HASH,
+                Some(s) => &s.compute_hash(),
+            };
+            if o.prev_hash == prev_hash {
+                history_integrity(&history)
+            }else{
+                false
+            }
+        }
+    }
+    
 }
+
