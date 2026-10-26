@@ -1,26 +1,20 @@
 
 
 
-use tokio::net::TcpListener;
+
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 
 use tokio::net::TcpStream;
 use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
-use std::error::Error;
-use std::f64::consts::E;
-use std::io::stderr;
-use std::os::unix::raw::off_t;
-use std::sync::mpsc::Receiver;
+
 use tokio::sync::broadcast;
 use tokio::sync::mpsc;
-use std::hash::{DefaultHasher, Hash, Hasher};
 
 use std::{io, println};
 use common::message::Message;
-use common::history::{self, HistoryHandle};
+use common::history::{HistoryHandle};
 
 use serde::{Serialize, Deserialize};
-
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", content = "data")]
@@ -38,11 +32,14 @@ pub enum ServerRequest {
 
 
 #[tokio::main]
-async fn main() -> io::Result<()> {
+async fn main() -> anyhow::Result<()> {
     
     // Connect to a peer
-    let mut socket = TcpStream::connect("127.0.0.1:9090").await?;
+    let socket = TcpStream::connect("127.0.0.1:9090").await?;
     println!("connection done");
+
+    // user input for the pseudo
+    println!("Type your psuedo : ");
     let mut pseudo = String::new();
     io::stdin().read_line(&mut pseudo).expect("Reading error");
     let pseudo: String = String::from(pseudo.trim());
@@ -55,8 +52,8 @@ async fn main() -> io::Result<()> {
     let history_clone = history.clone();
     
 
-    let (reader, mut writer) = socket.into_split();
-    let (tx_send, mut rx_send) = mpsc::channel::<ClientRequest>(32);
+    let (reader,  writer) = socket.into_split();
+    let (tx_send,  rx_send) = mpsc::channel::<ClientRequest>(32);
 
     tokio::spawn(async move {
         
@@ -71,11 +68,14 @@ async fn main() -> io::Result<()> {
 
     
 
-    tx_send.send(ClientRequest::GetHistory).await;
+    tx_send.send(ClientRequest::GetHistory).await?;
     
     loop {
+        
         let mut input = String::new();
         io::stdin().read_line(&mut input).expect("Reading error");
+        clear_screen();
+        history.print().await;
         let input: String = String::from(input.trim()); 
 
         let msg: Message = Message::new(
@@ -83,7 +83,7 @@ async fn main() -> io::Result<()> {
             history.prev_hash().await,
             String::from(pseudo.clone())
         );
-        tx_send.send(ClientRequest::SendMessage(msg)).await;
+        tx_send.send(ClientRequest::SendMessage(msg)).await?;
     }
         
 
@@ -94,7 +94,7 @@ async fn main() -> io::Result<()> {
 
 
 pub async fn read_task(reader: OwnedReadHalf, history: HistoryHandle)
-    -> Result<(), Box<dyn Error + Send + Sync>>
+    ->  anyhow::Result<()> 
  {
 
     let mut lines = BufReader::new(reader).lines();
@@ -102,29 +102,36 @@ pub async fn read_task(reader: OwnedReadHalf, history: HistoryHandle)
         let request: ServerRequest = match serde_json::from_str(&line) {
             Ok(r) => r,
             Err(e) => {
-                eprintln!("Error request");
+                eprintln!("Error request: {e}");
                 continue;
             },
         };
 
         match request {
             ServerRequest::NewMessage(msg) => {
-                println!("Received : {msg}");
                 
                 
-                match history.validate(msg).await {
-                    Ok(o) => {println!("Message integrity verified");},
-                    Err(e) => {
-                        println!("Message invalid");
+                
+                match history.validate(msg.clone()).await {
+                    Ok(_) => {println!("{msg} | \x1B[32mMessage integrity verified\x1B[0m");},
+                    Err(_) => {
+                        println!("{msg} | \x1B[31mMessage invalide\x1B[0m");
                         continue;
                     },
                 }
             },
             ServerRequest::History(new_history) => {
                 println!("New history received");
-                history.new_history(new_history).await;
-                clear_screen();
-                history.print().await;
+                match history.new_history(new_history).await {
+                    Ok(_) => {
+                        clear_screen();
+                        history.print().await;
+                    },
+                    Err(_) => {
+                        println!("Received history is not valid");
+                    }
+                };
+                
             }
             
 
@@ -136,7 +143,7 @@ pub async fn read_task(reader: OwnedReadHalf, history: HistoryHandle)
 }
 
 pub async fn write_task(mut writer: OwnedWriteHalf,mut rx_send: mpsc::Receiver<ClientRequest>)
-    -> Result<(), Box<dyn Error + Send + Sync>>
+    ->  anyhow::Result<()> 
 {
     while let Some(req) = rx_send.recv().await{
 

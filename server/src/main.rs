@@ -1,15 +1,12 @@
 use tokio::net::TcpListener;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 
-use tokio::net::TcpStream;
 use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
 use std::error::Error;
-use std::io::stderr;
-use std::os::unix::raw::off_t;
-use std::sync::mpsc::Receiver;
+
 use tokio::sync::broadcast;
 use tokio::sync::mpsc;
-use std::hash::{DefaultHasher, Hash, Hasher};
+
 
 use std::{io, println};
 use common::message::Message;
@@ -39,7 +36,6 @@ async fn main() -> io::Result<()> {
     let (tx_send_to_everyone, _ ) = broadcast::channel::<Message>(16);
     
     let history = HistoryHandle::new(tx_send_to_everyone.clone());
-    let tx_send_to_everyone_clone = tx_send_to_everyone.clone();
     
    
 
@@ -49,12 +45,12 @@ async fn main() -> io::Result<()> {
 
         println!("connection done");
     
-        let (reader, mut writer) = socket.into_split();
+        let (reader,  writer) = socket.into_split();
 
-        let mut rx_send_to_everyone = tx_send_to_everyone.subscribe();
+        let  rx_send_to_everyone = tx_send_to_everyone.subscribe();
 
         tokio::spawn(async move {
-            let (tx_reply, mut rx_reply) = mpsc::channel::<ServerRequest>(32);
+            let (tx_reply,  rx_reply) = mpsc::channel::<ServerRequest>(32);
             let write_handle = tokio::spawn({
                 
                 write_task( writer, rx_send_to_everyone, rx_reply)
@@ -80,7 +76,7 @@ pub async fn read_task(reader: OwnedReadHalf, history: HistoryHandle, tx_reply: 
         let request: ClientRequest = match serde_json::from_str(&line) {
             Ok(r) => r,
             Err(e) => {
-                eprintln!("Error request");
+                eprintln!("Error request : {e}");
                 continue;
             },
         };
@@ -89,21 +85,18 @@ pub async fn read_task(reader: OwnedReadHalf, history: HistoryHandle, tx_reply: 
             ClientRequest::SendMessage ( msg ) => {
         
                 
-                println!("Received : {msg}");
 
-                
-                match history.validate(msg).await{
-                    Ok(o) => o,
-                    Err(e) => {
-                        eprintln!("Message is not valid");
+                match history.validate(msg.clone()).await {
+                    Ok(_) => {println!("Received: {msg} | \x1B[32mMessage integrity verified\x1B[0m");},
+                    Err(_) => {
+                        println!("Received: {msg} | \x1B[31mMessage invalide\x1B[0m");
                         continue;
-                    }
-
-                };
+                    },
+                }
             },
             ClientRequest::GetHistory => {
                 
-                tx_reply.send(ServerRequest::History(history.get_history().await)).await;
+                let _ = tx_reply.send(ServerRequest::History(history.get_history().await)).await;
                 println!("History has been sent")
             }
 

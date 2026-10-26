@@ -1,5 +1,5 @@
 use serde::{Serialize, Deserialize};
-use std::{format, hash::{DefaultHasher, Hash, Hasher}};
+use std::hash::Hash;
 use uuid::Uuid;
 use jiff::Zoned;
 use std::fmt;
@@ -33,8 +33,11 @@ impl Message {
     
 }
 
+use std::fmt::Error;
+
 impl fmt::Display for Message {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}: {}", self.pseudo, self.content)
+    fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), Error> {
+        let _ = write!(f, "{}: {}", self.pseudo, self.content);
+        Ok(())
     }
 }

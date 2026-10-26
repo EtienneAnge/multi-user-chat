@@ -1,7 +1,7 @@
-use std::hash::{DefaultHasher, Hash, Hasher};
+use std::{eprintln, hash::{DefaultHasher, Hash, Hasher}};
 
 use tokio::sync::{broadcast, mpsc, oneshot};
-use crate::{history::HistoryCommand::{GetHistory, NewHistory}, message::Message};
+use crate::{message::Message};
 
 
 # [derive(Clone)]
@@ -11,7 +11,7 @@ pub struct HistoryHandle {
 
 enum HistoryCommand {
     NewHistory(oneshot::Sender<Result<(),()>>, Vec<Message>),
-    Validate(oneshot::Sender<Result<(),()>>, Message),
+    Validate(oneshot::Sender<Result<Message,()>>, Message),
     GetHistory(oneshot::Sender<Vec<Message>>),
 }
 
@@ -23,13 +23,13 @@ impl HistoryHandle {
         Self { tx }
     }
 
-    pub async fn validate(&self, msg: Message) -> Result<(),()> {
-        let (reply_tx, reply_rx) = oneshot::channel();
+    pub async fn validate(&self, msg: Message) -> Result<Message, ()> {
+        let (reply_tx, reply_rx) = oneshot::channel::<Result<Message, ()>>();
         self.tx
         .send(HistoryCommand::Validate(reply_tx, msg))
         .await
         .map_err(|_| ())?;
-        reply_rx.await.unwrap_or(Err(()))    
+        reply_rx.await.unwrap_or(Err(()))
     }
 
     pub async fn get_history(&self) -> Vec<Message> {
@@ -82,16 +82,18 @@ async fn history_actor(
                 
                 if msg.prev_hash == prev_hash {
                     historic.push(msg.clone());
-                    tx_send.send(msg);
-                    reply.send (Ok(()));
+                    _ =  tx_send.send(msg.clone());
+                    
+                    let _ = reply.send (Ok(msg));
                 }else{
                     eprintln!("prev_hash is not valid");
+                    let _ = reply.send (Err(()));
                 }
              },
              HistoryCommand::NewHistory(reply, new_history) => {
                 
                 historic = new_history;
-                reply.send (Ok(()));
+                let _ = reply.send (Ok(()));
              },
             HistoryCommand::GetHistory(reply) => { let _ = reply.send(historic.clone()); },
         }
