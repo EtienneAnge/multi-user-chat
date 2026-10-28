@@ -11,7 +11,7 @@ use tokio::sync::mpsc;
 use std::{io, println};
 use common::message::Message;
 use common::history::HistoryHandle;
-
+use tokio::io::AsyncReadExt;
 use serde::{Serialize, Deserialize};
 
 
@@ -32,7 +32,24 @@ pub enum ServerRequest {
 
 #[tokio::main]
 async fn main() -> io::Result<()> {
-    let listener = TcpListener::bind("127.0.0.1:9090").await?;
+
+    // Health check pour Clever Cloud (port 8080)
+    tokio::spawn(async {
+        let health = TcpListener::bind("0.0.0.0:8080").await.expect("bind 8080");
+        loop {
+            if let Ok((mut sock, _)) = health.accept().await {
+                tokio::spawn(async move {
+                    let mut buf = [0u8; 1024];
+                    let _ = sock.read(&mut buf).await; // lit la requête HTTP
+                    let _ = sock
+                        .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nOK")
+                        .await;
+                });
+            }
+        }
+    });
+
+    let listener = TcpListener::bind("0.0.0.0:4040").await?;
     let (tx_send_to_everyone, _ ) = broadcast::channel::<Message>(16);
     
     let history = HistoryHandle::new(tx_send_to_everyone.clone());
